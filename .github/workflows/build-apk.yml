@@ -1,0 +1,47 @@
+name: Build SaubreSache Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Repository laden
+        uses: actions/checkout@v4
+
+      - name: Java 17 einrichten
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Android SDK einrichten
+        uses: android-actions/setup-android@v3
+
+      - name: Android 35 installieren
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Gradle 8.9 einrichten
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Projekt entpacken
+        run: unzip -q SaubreSache_DetailingOS_GitHub_FreeBuild.zip -d extracted
+
+      - name: Debug APK bauen
+        working-directory: extracted/SaubreSache_DetailingOS_Android_Dummy
+        run: gradle :app:assembleDebug --stacktrace
+
+      - name: APK umbenennen
+        run: cp extracted/SaubreSache_DetailingOS_Android_Dummy/app/build/outputs/apk/debug/app-debug.apk SaubreSache-DetailingOS-Dummy.apk
+
+      - name: APK als Download bereitstellen
+        uses: actions/upload-artifact@v4
+        with:
+          name: SaubreSache-DetailingOS-Dummy-APK
+          path: SaubreSache-DetailingOS-Dummy.apk
+          retention-days: 7
