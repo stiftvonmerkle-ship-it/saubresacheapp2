@@ -1,0 +1,113 @@
+name: Build SaubreSache Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Repository laden
+        uses: actions/checkout@v5
+
+      - name: Java 17 einrichten
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Android SDK vorbereiten
+        shell: bash
+        run: |
+          set -e
+          ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager 2>/dev/null | head -n 1)"
+          fi
+
+          if [ -z "$SDKMANAGER" ] || [ ! -x "$SDKMANAGER" ]; then
+            echo "sdkmanager wurde nicht gefunden."
+            find "$ANDROID_HOME" -maxdepth 4 -type f -name sdkmanager -print || true
+            exit 1
+          fi
+
+          echo "Verwende sdkmanager: $SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
+          echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
+          echo "$ANDROID_HOME/build-tools/35.0.0" >> "$GITHUB_PATH"
+
+      - name: Gradle 8.9 einrichten
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Projekt entpacken
+        shell: bash
+        run: |
+          set -e
+          rm -rf extracted
+          mkdir -p extracted
+          unzip -q SaubreSache_DetailingOS_GitHub_FreeBuild.zip -d extracted
+          echo "Entpackte Ordner:"
+          find extracted -maxdepth 2 -type d -print
+
+      - name: Android-Projekt finden
+        id: project
+        shell: bash
+        run: |
+          set -e
+          PROJECT_DIR="$(find extracted -type f -path '*/app/build.gradle' -printf '%h\n' | sed 's#/app$##' | head -n 1)"
+          if [ -z "$PROJECT_DIR" ]; then
+            echo "Kein Android-Projekt mit app/build.gradle gefunden."
+            find extracted -maxdepth 4 -type f | sort | head -n 200
+            exit 1
+          fi
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "Gefundenes Projekt: $PROJECT_DIR"
+
+      - name: Projekt prüfen
+        shell: bash
+        run: |
+          set -e
+          cd "$PROJECT_DIR"
+          java -version
+          gradle --version
+          test -f settings.gradle || test -f settings.gradle.kts
+          test -f app/build.gradle || test -f app/build.gradle.kts
+          test -f app/src/main/AndroidManifest.xml
+
+      - name: Debug APK bauen
+        shell: bash
+        run: |
+          set -e
+          cd "$PROJECT_DIR"
+          gradle :app:assembleDebug --no-daemon --stacktrace
+
+      - name: APK finden und umbenennen
+        shell: bash
+        run: |
+          set -e
+          APK_PATH="$(find "$PROJECT_DIR/app/build/outputs/apk" -type f -name '*debug*.apk' | head -n 1)"
+          if [ -z "$APK_PATH" ]; then
+            echo "Keine Debug-APK gefunden."
+            find "$PROJECT_DIR/app/build/outputs" -maxdepth 6 -type f -print || true
+            exit 1
+          fi
+          cp "$APK_PATH" SaubreSache-DetailingOS-Dummy.apk
+          ls -lh SaubreSache-DetailingOS-Dummy.apk
+
+      - name: APK als Download bereitstellen
+        uses: actions/upload-artifact@v4
+        with:
+          name: SaubreSache-DetailingOS-Dummy-APK
+          path: SaubreSache-DetailingOS-Dummy.apk
+          retention-days: 14
+          if-no-files-found: error
